@@ -459,6 +459,7 @@ class MainActivity : Activity() {
                 .putLong("wp_photo_light", photo).putLong("wp_photo_at_light", at)
                 .putBoolean("wp_shared", true).apply()
         }
+        chillToolbar()
         applyTopBar()
         applyTheme()
         setUpTitle() // after the theme: the pill is styled with the theme's card colours
@@ -482,22 +483,20 @@ class MainActivity : Activity() {
             R.id.launcherSettings to { unlock { openLauncherSettings() } },
             R.id.powerButton to { powerDialog() },
         )) findViewById<ImageView>(id).apply {
-            setColorFilter(fg)
-            val ring = GradientDrawable().apply { shape = GradientDrawable.OVAL }
+            setColorFilter(Color.WHITE)
+            layoutParams = layoutParams.apply { width = dp(40); height = dp(40) } // Smooth Plume: round buttons in the capsule
+            val ring = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(TOP_DISC) }
             // Lit, the icon sits on its ring, so it takes the theme colour; otherwise it's on the wallpaper (see fitInk).
             // Under the ring, the icon's shadow (see iconShadow); empty until fitInk.
             background = LayerDrawable(arrayOf(ColorDrawable(Color.TRANSPARENT), ring))
             setOnFocusChangeListener { v, focused ->
                 if (focused) lastTop = v
-                (background as LayerDrawable).getDrawable(0).alpha = if (focused) 0 else 255 // on its disc it needs none
-                // With glass a lit icon sits on a glass disc: the frost, its light and the wallpaper's tint.
-                val disc = glassActive()
-                ring.setColor(if (!focused) 0 else if (disc) glassLook().tile(lit = true) else if (dark) DARK_CARD_LIT[0] else Color.WHITE)
-                if (focused && disc) glass.add(v, v.width / 2f) else glass.remove(v)
-                if (disc) glass.kick(260) // the disc grows with the icon
-                setColorFilter(if (focused) fg else iconInk)
-                animate().scaleX(if (focused) 1.15f else 1f).scaleY(if (focused) 1.15f else 1f)
-                    .setDuration(160).setInterpolator(DECELERATE).start()
+                (background as LayerDrawable).getDrawable(0).alpha = 0
+                // Smooth Plume (ChillHub style): a translucent disc at rest, a white one with a dark icon when selected.
+                ring.setColor(if (focused) Color.WHITE else TOP_DISC)
+                setColorFilter(if (focused) focusInk() else Color.WHITE)
+                animate().scaleX(if (focused) 1.08f else 1f).scaleY(if (focused) 1.08f else 1f)
+                    .setDuration(if (focused) FOCUS_MS else SETTLE_MS).setInterpolator(if (focused) SPRING else EASE).start()
             }
             setOnClickListener { action() }
             setOnLongClickListener { if (!holdFired) fireHold(this); true } // hold OK: move, hide or add icons
@@ -964,28 +963,16 @@ class MainActivity : Activity() {
      */
     private fun homePopup(step: Int, title: String, body: String?, extra: View?, vararg buttons: Pair<String, () -> Unit>, frosted: Boolean = false) {
         setupDialog?.let { setupDialog = null; it.dismiss() } // replaced, not closed: the dismiss listener leaves the flow alone
-        val frost = frosted && Backdrop.of(currentWallpaper()) != Backdrop.PLAIN
-        val card: LinearLayout = if (frost || glassActive()) glassSurface(dp(20).toFloat()).also { box ->
-            if (frost) {
-                // Its own blur, not the setting's: applyGlass sets it, also when the wallpaper loads after the card opens.
-                glassSurfaces.removeAll { it.get() === box.glass }
-                frostedCard = java.lang.ref.WeakReference(box.glass)
-                box.glass.setBlur(frostedBlur())
-            }
-        } else LinearLayout(this).apply {
-            background = if (dark) rimCard(dp(16), false, solid = true) else GradientDrawable().apply {
-                cornerRadius = dp(16).toFloat()
-                setColor(0xFFF7F8FA.toInt())
-            }
-        }
+        // Smooth Plume: one dark translucent card in every theme, so the white menu pills read on it.
+        val card = LinearLayout(this).apply { background = menuCard(24) }
         card.apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(28), dp(24), dp(28), dp(20))
             // Google TV and Fire TV skip the role step, so their count starts at the service.
             val skip = if (fireTv() || googleTv()) 1 else 0
-            if (step > 0) addView(label(getString(R.string.setup_step, step - skip, 3 - skip), 12f).apply { secondary(0.6f) })
-            addView(label(title, 22f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, dp(4), 0, 0) })
-            body?.let { addView(label(it, 14f).apply { maxLines = 6; secondary(0.8f); setLineSpacing(0f, 1.15f); setPadding(0, dp(10), 0, 0) }) }
+            if (step > 0) addView(label(getString(R.string.setup_step, step - skip, 3 - skip), 12f).apply { setTextColor(valueInk()) })
+            addView(label(title, 22f).apply { typeface = quickBold; setTextColor(Color.WHITE); setPadding(0, dp(4), 0, 0) })
+            body?.let { addView(label(it, 14f).apply { maxLines = 6; setTextColor(0xD9FFFFFF.toInt()); setLineSpacing(0f, 1.15f); setPadding(0, dp(10), 0, 0) }) }
             extra?.let { addView(it) }
             buttons.forEachIndexed { i, (name, action) ->
                 addView(settingsRow(name, "") { if (previewAt >= 0) previewHomeSetup(previewAt + 1) else action() },
@@ -1118,8 +1105,8 @@ class MainActivity : Activity() {
         for (id in intArrayOf(R.id.clock, R.id.date, R.id.appsTitle, R.id.watchTitle, R.id.allAppsTitle, R.id.rowLabel, R.id.weather, R.id.featured)) {
             findViewById<TextView>(id).setTextColor(fg)
         }
-        iconInk = fg
-        for (v in topIcons()) v.setColorFilter(if (v.isFocused) fg else iconInk)
+        iconInk = Color.WHITE
+        for (v in topIcons()) v.setColorFilter(if (v.isFocused) focusInk() else iconInk)
         watchInk = fg
         appsInk = fg
     }
@@ -1142,12 +1129,8 @@ class MainActivity : Activity() {
         val top = listOf(R.id.clock, R.id.date, R.id.weather, R.id.featured).map { findViewById<TextView>(it) }
         val topInk = inkBehind(top)
         for (v in top) ink(v, topInk, fade = true)
-        val icons = topIcons()
-        iconInk = inkBehind(icons)
-        for (v in icons) {
-            if (!v.isFocused) v.setColorFilter(iconInk)
-            iconShadow(v)
-        }
+        iconInk = Color.WHITE // Smooth Plume: the icons sit in the capsule, white on its translucent discs
+        for (v in topIcons()) if (!v.isFocused) v.setColorFilter(iconInk)
         val names = findViewById<LinearLayout>(R.id.nameRow).let { row -> (0 until row.childCount).map { row.getChildAt(it) as TextView } }
         val apps = listOf(findViewById<TextView>(R.id.appsTitle)) + names
         // Measured over the whole row, so the On focus name keeps one colour as it moves from tile to tile.
@@ -1553,7 +1536,23 @@ class MainActivity : Activity() {
 
     private var wallpaperLoad = 0
 
-    /** Smooth Plume: 0 (off) to 4 (strongest); see BLUR_RADII. */
+    /** Smooth Plume: Background blur as its own list, like ChillHub's; the wallpaper changes as you pick. */
+    private fun pickBlur() {
+        val now = wallpaperBlur()
+        heroArt = { heroIcon(R.drawable.ms_wallpaper) }
+        showPage(getString(R.string.wp_blur), blurNames().mapIndexed { i, name ->
+            page(name, if (i == now) CHOSEN else "") {
+                prefs.edit().putInt("wp_blur", i).apply()
+                loadWallpaper()
+                pickBlur()
+            }
+        }, now, crumb = getString(R.string.section_style)) { renderSettings(R.string.wp_blur) }
+    }
+
+    /** Smooth Plume: the Background blur levels by name, as ChillHub numbers them. */
+    private fun blurNames() = listOf(getString(R.string.blur_none)) + BLUR_NAMES
+
+    /** Smooth Plume: an index into BLUR_RADII, 0 being off. */
     private fun wallpaperBlur() = prefs.getInt("wp_blur", 0).coerceIn(0, BLUR_RADII.size - 1)
     private var folderPending = false
     private var folderRetries = 0
@@ -1944,7 +1943,7 @@ class MainActivity : Activity() {
             addView(frame, LinearLayout.LayoutParams(MATCH_PARENT, dp(62)))
             addView(label, LinearLayout.LayoutParams(MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
             setOnClickListener { action() }
-            panelFocus(this, 12, help?.let { getString(it) }, AREA_ALL) { f ->
+            panelFocus(this, 16, help?.let { getString(it) }, AREA_ALL, pill = false) { f ->
                 label.setTextColor(if (f) focusInk() else if (chosen) restInk() else valueInk())
             }
             // The panel turns Left and Right into a row's step (dispatchKeyEvent); in the grid they move between pictures.
@@ -2727,24 +2726,20 @@ class MainActivity : Activity() {
         settingsScrim.background = spotlight.apply { reset() }
         pages.clear()
         settingsScrim.visibility = View.VISIBLE
+        findViewById<View>(R.id.content).animate().alpha(0f).setDuration(200).setInterpolator(EASE).start()
         homeFocusable(false)
     }
 
     /** The panel is frosted glass over the wallpaper when Glass is on, and the plain surface otherwise. */
     private fun showPanelGlass() {
         val panel = findViewById<GlassBox>(R.id.settingsPanel)
-        if (glassActive()) {
-            panel.background = null
-            panel.setWillNotDraw(false)
-            styleGlass(panel.glass, dp(22).toFloat(), flatRight = true)
-        } else {
-            panel.setWillNotDraw(true)
-            panel.background = if (!dark) ColorDrawable(0xFFF7F8FA.toInt())
-                else LayerDrawable(arrayOf(ColorDrawable(DARK_BG), ColorDrawable(PANEL_EDGE))).apply {
-                    setLayerGravity(1, Gravity.START or Gravity.FILL_VERTICAL)
-                    setLayerWidth(1, 1)
-                }
-        }
+        // Smooth Plume: no panel surface; the pills float over the dimmed (and blurred) wallpaper, ChillHub style.
+        panel.layoutParams = (panel.layoutParams as FrameLayout.LayoutParams).apply { width = (resources.displayMetrics.widthPixels * 0.58f).toInt() }
+        panel.setPadding(dp(8), dp(36), dp(48), dp(16))
+        panel.background = null
+        panel.setWillNotDraw(true)
+        findViewById<View>(R.id.settingsTitle).visibility = View.GONE
+        findViewById<View>(R.id.settingsCrumb).visibility = View.GONE
         panel.invalidate()
         if (settingsScrim.background === spotlight) spotlight.invalidateSelf()
         settingsScrim.invalidate()
@@ -2758,6 +2753,7 @@ class MainActivity : Activity() {
         pageExit = null
         pageBack = null
         settingsScrim.visibility = View.GONE
+        findViewById<View>(R.id.content).animate().alpha(1f).setDuration(220).setInterpolator(EASE).start()
         homeFocusable(allApps.visibility != View.VISIBLE) // the PIN can open over All apps
         (panelFrom?.takeIf { it.isAttachedToWindow } ?: findViewById(R.id.launcherSettings)).requestFocus()
         panelFrom = null
@@ -2844,7 +2840,7 @@ class MainActivity : Activity() {
                 renderSettings(R.string.glass)
             },
             R.string.wp_blur to { d ->
-                prefs.edit().putInt("wp_blur", BLUR_LEVELS.indices.toList().step(wallpaperBlur(), d)).apply()
+                prefs.edit().putInt("wp_blur", BLUR_RADII.indices.toList().step(wallpaperBlur(), d)).apply()
                 loadWallpaper()
                 renderSettings(R.string.wp_blur)
             },
@@ -2858,8 +2854,11 @@ class MainActivity : Activity() {
             R.string.glass to Triple(getString(R.string.glass), getString(glassName())) {
                 steps[R.string.glass]!!(1)
             },
-            R.string.wp_blur to Triple(getString(R.string.wp_blur), getString(BLUR_LEVELS[wallpaperBlur()])) {
-                steps[R.string.wp_blur]!!(1)
+            R.string.wp_blur to Triple(getString(R.string.wp_blur), blurNames()[wallpaperBlur()] + "  ›") { pickBlur() },
+            R.string.app_shelf to Triple(getString(R.string.app_shelf), toggle(shelfOn())) {
+                prefs.edit().putBoolean("app_shelf", !shelfOn()).apply()
+                renderApps()
+                renderSettings(R.string.app_shelf)
             },
             R.string.focus_ring to Triple(getString(R.string.focus_ring), toggle(ringOn())) {
                 prefs.edit().putBoolean("focus_ring", !ringOn()).apply()
@@ -2992,7 +2991,7 @@ class MainActivity : Activity() {
             Triple(R.string.section_style, "${rows[R.string.theme]!!.second} · ${getString(glassName())}",
                 listOf(R.string.theme, R.string.glass, R.string.wp_blur, R.string.focus_ring, R.string.app_animations)),
             Triple(R.string.section_app_row, "${rows[R.string.apps_in_row]!!.second} · ${rows[R.string.row_position]!!.second}",
-                listOf(R.string.edit_apps_row, R.string.apps_in_row, R.string.sort_apps, R.string.icon_style, R.string.row_size, R.string.app_names, R.string.row_position)),
+                listOf(R.string.edit_apps_row, R.string.apps_in_row, R.string.sort_apps, R.string.icon_style, R.string.app_shelf, R.string.row_size, R.string.app_names, R.string.row_position)),
             // "When hidden" only means something once the row can hide.
             Triple(R.string.bottom_row, "${rowName()} · ${rows[R.string.show_row]!!.second}", listOfNotNull(R.string.show_row, R.string.apps_when_hidden.takeIf { rowShow() != "always" },
                 R.string.row_name, R.string.show_icons, R.string.cw_apps, R.string.cw_channels, R.string.cards_rows, R.string.restore_hidden)),
@@ -3026,7 +3025,6 @@ class MainActivity : Activity() {
                 R.string.theme to listOf(R.string.theme_light to R.drawable.ms_light_mode, R.string.theme_dark to R.drawable.ms_dark_mode,
                     R.string.theme_wallpaper to R.drawable.ms_wallpaper, R.string.theme_auto to R.drawable.ms_routine).map { (s, i) -> getString(s) to i },
                 R.string.glass to listOf(R.string.off, R.string.glass_frosted, R.string.glass_clear).map { getString(it) to null },
-                R.string.wp_blur to BLUR_LEVELS.map { getString(it) to null },
                 R.string.sort_apps to listOf(R.string.manual, R.string.most_used).map { getString(it) to null },
                 R.string.app_names to listOf(R.string.on_focus, R.string.always, R.string.never).map { getString(it) to null },
                 R.string.row_size to ROW_SIZES.values.map { getString(it.first) to null },
@@ -3046,6 +3044,7 @@ class MainActivity : Activity() {
                     // Without the adb permission, Home opens Plume is switched on in Android's Accessibility screen.
                     ext = k == R.string.home_button && !homeServiceOn() && checkSelfPermission(WRITE_SECURE) != PackageManager.PERMISSION_GRANTED)
             }
+            heroArt = { heroIcon(SECTION_ICONS[section.first] ?: R.drawable.ic_tune) }
             return showPage(getString(section.first), keys.map { rows[it]!! }, keys.indexOf(at), steps = keys.map { steps[it] }, styles = styles,
                 crumb = getString(R.string.plume_settings)) {
                 renderSettings(section.first)
@@ -3076,6 +3075,7 @@ class MainActivity : Activity() {
                 else Triple(R.string.preview_home_setup, page(getString(R.string.preview_home_setup)) { closeLauncherSettings(); previewHomeSetup() },
                     RowStyle(R.drawable.ms_code)))
         lastSettings = 0
+        heroArt = { heroCard(getDrawable(R.drawable.banner), banner = true) }
         showPage(getString(R.string.plume_settings), top.map { it.second }, maxOf(0, top.indexOfFirst { it.first == at }), styles = top.map { it.third }, back = null)
     }
 
@@ -3188,9 +3188,13 @@ class MainActivity : Activity() {
             v.animate().translationX(0f).alpha(1f).setDuration(200).setInterpolator(DECELERATE).start()
         }
         findViewById<TextView>(R.id.settingsTitle).text = title
-        findViewById<TextView>(R.id.settingsCrumb).apply {
-            text = crumb?.let { "$it  ›" }
-            visibility = if (crumb == null) View.GONE else View.VISIBLE
+        findViewById<TextView>(R.id.settingsCrumb).text = crumb?.let { "$it  ›" }
+        updateHero(title, crumb, (heroArt ?: { heroIcon(R.drawable.ic_tune) })())
+        heroArt = null
+        if (dir != 0) hero.apply {
+            alpha = 0f
+            translationX = dp(24) * dir.toFloat()
+            animate().translationX(0f).alpha(1f).setDuration(260).setInterpolator(EASE).start()
         }
         findViewById<TextView>(R.id.settingsHelp).setLines(if (back == null) 2 else 3)
         showHelp(null)
@@ -3211,6 +3215,60 @@ class MainActivity : Activity() {
         focusables.first().nextFocusUpId = focusables.last().id
         focusables.last().nextFocusDownId = focusables.first().id
         (added.drop(focus.coerceIn(0, rows.size - 1)).firstOrNull { it.isFocusable } ?: focusables.first()).requestFocus()
+    }
+
+    // ---------- Smooth Plume: the big picture and title on the left of the settings ----------
+
+    /** What the next showPage puts above its title on the left; the tune icon when nothing is set. */
+    private var heroArt: (() -> View)? = null
+
+    private val hero: LinearLayout by lazy {
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            (settingsScrim as ViewGroup).addView(this, 0, FrameLayout.LayoutParams(
+                (resources.displayMetrics.widthPixels * 0.42f).toInt(), MATCH_PARENT, Gravity.START))
+        }
+    }
+
+    private fun updateHero(title: String, crumb: String?, art: View) {
+        hero.removeAllViews()
+        (art.parent as? ViewGroup)?.removeView(art)
+        hero.addView(art)
+        hero.addView(label(title, 32f).apply {
+            typeface = quickBold
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            maxLines = 2
+            setShadowLayer(dp(8).toFloat(), 0f, dp(1).toFloat(), 0x59000000)
+            setPadding(dp(32), dp(22), dp(32), 0)
+        }, LinearLayout.LayoutParams(MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        crumb?.let {
+            hero.addView(label(it, 16f).apply {
+                setTextColor(0xC0FFFFFF.toInt())
+                gravity = Gravity.CENTER
+                setPadding(dp(32), dp(4), dp(32), 0)
+            }, LinearLayout.LayoutParams(MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun heroIcon(res: Int): View = ImageView(this).apply {
+        setImageResource(res)
+        setColorFilter(Color.WHITE)
+        layoutParams = LinearLayout.LayoutParams(dp(84), dp(84))
+    }
+
+    /** A rounded card like a home tile: the app's banner, or its icon on white. */
+    private fun heroCard(picture: Drawable?, banner: Boolean): View = FrameLayout(this).apply {
+        background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(Color.WHITE) }
+        clipToOutline = true
+        elevation = dp(10).toFloat()
+        addView(ImageView(context).apply {
+            setImageDrawable(picture)
+            if (banner) scaleType = ImageView.ScaleType.CENTER_CROP
+            else { scaleType = ImageView.ScaleType.FIT_CENTER; setPadding(dp(30), dp(18), dp(30), dp(18)) }
+        }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        layoutParams = LinearLayout.LayoutParams(dp(236), dp(133))
     }
 
     // ---------- layout lock ----------
@@ -3362,9 +3420,14 @@ class MainActivity : Activity() {
         private var anim: ValueAnimator? = null
         private val path = Path()
 
+        /** Smooth Plume: a colour over the whole screen instead of the dim (an app's own colour in its menu). */
+        var tint: Int? = null
+            set(v) { field = v; invalidateSelf() }
+
         fun reset() {
             anim?.cancel()
             open = 0f
+            tint = null
             invalidateSelf()
         }
 
@@ -3391,6 +3454,7 @@ class MainActivity : Activity() {
         private val scrimAlpha get() = glassLook().active?.scrim ?: SCRIM_ALPHA
 
         override fun draw(c: Canvas) {
+            tint?.let { return c.drawColor(it) }
             val dim = scrimAlpha shl 24
             if (open == 0f) return c.drawColor(dim)
             path.reset()
@@ -3444,22 +3508,34 @@ class MainActivity : Activity() {
     // Settings colours, one set for each surface (dark or light, solid or glass). Over glass the text is a little
     // stronger and has a soft shadow, as the wallpaper's colour shows through the panel. Focus is always the brightest.
     private fun ink(a: Float) = (fg and 0xFFFFFF) or ((a * 255).toInt() shl 24)
-    private fun restInk() = ink(if (dark) (if (glassActive()) .9f else .82f) else (if (glassActive()) .86f else .8f))
-    private fun valueInk(focused: Boolean = false) =
-        if (focused) ink(if (dark) .85f else .8f) else ink(if (glassActive()) (if (dark) .68f else .64f) else .56f)
-    private fun focusInk() = if (dark) Color.WHITE else fg
-    private fun iconInk(focused: Boolean) = if (focused) focusInk() else ink(if (dark) (if (glassActive()) .8f else .7f) else .65f)
+    // Smooth Plume: menus are white text on translucent pills over the wallpaper; the selected pill turns solid white
+    // with dark text (ChillHub style), in every theme.
+    private fun restInk() = 0xF0FFFFFF.toInt()
+    private fun valueInk(focused: Boolean = false) = if (focused) 0xFF5A5A5A.toInt() else 0xB8FFFFFF.toInt()
+    private fun focusInk() = 0xFF141414.toInt()
+    private fun iconInk(focused: Boolean) = if (focused) focusInk() else 0xE0FFFFFF.toInt()
 
     /** The plate under the focused row: a white veil in dark, a white card in light (its shadow is the view's elevation). */
     private fun plate(radius: Int) = GradientDrawable().apply {
         cornerRadius = dp(radius).toFloat()
-        setColor(if (dark) (if (glassActive()) 0x2EFFFFFF else 0x1FFFFFFF) else if (glassActive()) 0xC7FFFFFF.toInt() else Color.WHITE)
-        if (dark) setStroke(1, 0x14FFFFFF) // 1px, a hairline that catches the light
+        setColor(Color.WHITE)
     }
 
-    private fun TextView.panelShadow() {
-        if (glassActive()) setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), if (dark) 0x73000000 else 0x59FFFFFF)
+    /** Smooth Plume: the dark translucent card behind popups and hold menus. */
+    private fun menuCard(radius: Int) = GradientDrawable().apply {
+        cornerRadius = dp(radius).toFloat()
+        setColor(0xE61C1D21.toInt())
+        setStroke(1, 0x26FFFFFF)
     }
+
+    /** Smooth Plume: the translucent pill under a row at rest. */
+    private fun restPill(radius: Int) = GradientDrawable().apply {
+        cornerRadius = dp(radius).toFloat()
+        setColor(0x2EFFFFFF)
+        setStroke(1, 0x1FFFFFFF) // 1px hairline
+    }
+
+    private fun TextView.panelShadow() = Unit // Smooth Plume: the pills carry the contrast, so no text shadow
 
     /** The filled twin of an outlined Material Symbols icon (ms_x has ms_x_fill), or the icon itself. */
     private fun filled(res: Int) =
@@ -3472,35 +3548,33 @@ class MainActivity : Activity() {
     }
 
     /** A settings group's title, like "Home screen". Not focusable. */
-    private fun groupTitle(text: String) = label(text, 13f).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private fun groupTitle(text: String) = label(text, 14f).apply {
+        typeface = quickBold
         setTextColor(valueInk())
         panelShadow()
         setPadding(dp(16), dp(18), dp(16), dp(4))
     }
 
     /** Focus fades the plate in and lights the row; the row's own parts restyle themselves in [onFocus]. */
-    private fun panelFocus(v: View, radius: Int, help: String?, area: Int?, onFocus: (Boolean) -> Unit) {
+    private fun panelFocus(v: View, radius: Int, help: String?, area: Int?, pill: Boolean = true, onFocus: (Boolean) -> Unit) {
         val lit = plate(radius)
-        // Smooth Plume: settings rows get the same outline as the home tiles, and grow a touch when selected.
-        val ring = if (ringOn()) focusRing(radius, focusInk()).also { v.foreground = it } else null
+        // Smooth Plume: every row rests on a translucent pill; the selected one turns white and grows a touch.
+        val rest = if (pill) restPill(radius) else null
+        v.background = rest
         v.isFocusable = true
         v.isClickable = true
         v.setOnFocusChangeListener { _, focused ->
-            v.background = if (focused) lit else null
+            v.background = if (focused) lit else rest
             if (focused) ValueAnimator.ofInt(0, 255).apply {
                 duration = 180
                 interpolator = DECELERATE
                 addUpdateListener { lit.alpha = it.animatedValue as Int }
             }.start()
-            ring?.let { fadeRing(it, focused) }
             val grow = if (focused) 1.02f else 1f
             v.animate().scaleX(grow).scaleY(grow)
                 .setDuration(if (focused) FOCUS_MS else SETTLE_MS).setInterpolator(if (focused) SPRING else EASE).start()
-            if (!dark) { // the white card needs a shadow to stand off the near-white panel
-                v.outlineProvider = ViewOutlineProvider.BACKGROUND
-                v.elevation = if (focused) dp(3).toFloat() else 0f
-            }
+            v.outlineProvider = ViewOutlineProvider.BACKGROUND
+            v.elevation = if (focused) dp(4).toFloat() else 0f
             onFocus(focused)
             if (focused) {
                 showHelp(help)
@@ -3579,7 +3653,7 @@ class MainActivity : Activity() {
             addView(line, LinearLayout.LayoutParams(MATCH_PARENT, wrap))
             below?.let { addView(it, LinearLayout.LayoutParams(MATCH_PARENT, wrap).apply { topMargin = dp(10); marginStart = if (iconView != null) dp(40) else 0 }) }
             setOnClickListener { action() }
-            panelFocus(this, 12, style?.help, style?.area) { focused ->
+            panelFocus(this, 20, style?.help, style?.area) { focused ->
                 // The title glides to bright rather than snapping, so moving through the list feels smooth.
                 ValueAnimator.ofArgb(name.currentTextColor, if (focused) focusInk() else restInk()).apply {
                     duration = 160
@@ -3663,8 +3737,9 @@ class MainActivity : Activity() {
                 val accent = glassLook().accent()
                 p.background = if (!on) null else GradientDrawable().apply {
                     cornerRadius = dp(9).toFloat()
-                    setColor(accent?.let { it and 0xFFFFFF or ((if (focused) 0x4D else 0x33) shl 24) } ?: ink(if (focused) .16f else .09f))
-                    setStroke(line, accent ?: ink(if (focused) .85f else .45f))
+                    // Smooth Plume: white-based on the translucent pill, dark-based on the white one.
+                    setColor(accent?.let { it and 0xFFFFFF or ((if (focused) 0x4D else 0x33) shl 24) } ?: if (focused) 0x14000000 else 0x33FFFFFF)
+                    setStroke(line, accent ?: if (focused) focusInk() else 0x99FFFFFF.toInt())
                 }
             }
         }
@@ -3781,7 +3856,7 @@ class MainActivity : Activity() {
             }
             knob.background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(if (!on) c else if (dark) Color.BLACK else Color.WHITE)
+                setColor(if (!on) c else if (focused) Color.WHITE else focusInk()) // Smooth Plume: reads on both pills
             }
         }
         paint(false)
@@ -3961,6 +4036,13 @@ class MainActivity : Activity() {
             requestLayout()
         }
         appRow.removeAllViews()
+        // Smooth Plume: ChillHub's shelf, a translucent rounded band behind the row. The scroller already reaches a
+        // grid gap past the tiles on each side (room for the lift), which is the shelf's margin.
+        findViewById<View>(R.id.appScroll).background = if (!shelfOn()) null else GradientDrawable().apply {
+            cornerRadius = dp(26).toFloat()
+            setColor(0x24FFFFFF)
+            setStroke(1, 0x1FFFFFFF)
+        }
         val hidden = rowHiddenSet()
         val tiles = sortedApps().filter { inRow(it.pkg, hidden) }.map { appTile(it, labeled = false) }
         if (tiles.isEmpty()) return showNames()
@@ -4434,26 +4516,79 @@ class MainActivity : Activity() {
             getString(R.string.open) to { v.performClick(); Unit },
             getString(R.string.unlock_to_edit) to { unlock { v.requestFocus(); appMenu(v) } },
         ))
-        holdMenu(v, listOfNotNull(
-            getString(R.string.move) to { startEdit(grab = v, once = true) },
-            if (pkg.startsWith(HDMI)) null else getString(R.string.change_app_picture) to {
-                appPictures(pkg, v.contentDescription.toString())
-            },
-            getString(R.string.remove_from_row) to {
-                val i = appRow.indexOfChild(v)
-                // An input just unpins: it is in the Sources list anyway, so there is nothing to hide.
-                if (pkg.startsWith(HDMI)) prefs.edit().putStringSet("inputs_pinned", pinnedInputs() - pkg).apply()
-                else prefs.edit().putStringSet("row_hidden", rowHiddenSet() + pkg).apply()
-                renderApps()
-                appRow.getChildAt(minOf(i, appRow.childCount - 1))?.requestFocus()
-                toast(getString(R.string.removed_from_row))
-            },
-            if (pkg.startsWith(HDMI)) null else getString(R.string.app_info) to {
-                openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
-            },
-            if (canUninstall(pkg)) getString(R.string.uninstall) to { uninstall(pkg) } else null,
-        ))
+        appSheet(v, pkg)
     }
+
+    /**
+     * Smooth Plume: the app's menu as a full screen in its own colour (ChillHub style). Its tile on the left; on the
+     * right Move and Remove from row as chips, then the other actions as pills.
+     */
+    private fun appSheet(v: View, pkg: String) {
+        val app = listed().firstOrNull { it.pkg == pkg }
+        val name = v.contentDescription?.toString() ?: app?.label ?: pkg
+        val hdmi = pkg.startsWith(HDMI)
+        fun backToTile() {
+            closeLauncherSettings()
+            (0 until appRow.childCount).map { appRow.getChildAt(it) }.firstOrNull { it.tag == pkg }?.requestFocus()
+        }
+        showPanel()
+        val colour = if (hdmi || app == null) null else BRAND_COLOURS[pkg] ?: rawAccent(app)
+        spotlight.tint = colour?.let { (deepen(it) and 0xFFFFFF) or (0xD9 shl 24) }
+        val chips = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(8))
+        }
+        fun chip(text: String, res: Int, action: () -> Unit) {
+            val ic = icon(res, 20, iconInk(false))
+            val t = label(text, 16f).apply { setTextColor(restInk()) }
+            chips.addView(LinearLayout(this).apply {
+                id = View.generateViewId()
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(18), dp(10), dp(20), dp(10))
+                addView(ic, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(10) })
+                addView(t)
+                setOnClickListener { action() }
+                panelFocus(this, 24, null, null) { f ->
+                    t.setTextColor(if (f) focusInk() else restInk())
+                    ic.setColorFilter(iconInk(f))
+                }
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(10) })
+        }
+        chip(getString(R.string.move), R.drawable.ms_swap_horiz) { closeLauncherSettings(); startEdit(grab = v, once = true) }
+        chip(getString(R.string.remove_from_row), R.drawable.ms_visibility_off) {
+            val i = appRow.indexOfChild(v)
+            closeLauncherSettings()
+            // An input just unpins: it is in the Sources list anyway, so there is nothing to hide.
+            if (hdmi) prefs.edit().putStringSet("inputs_pinned", pinnedInputs() - pkg).apply()
+            else prefs.edit().putStringSet("row_hidden", rowHiddenSet() + pkg).apply()
+            renderApps()
+            appRow.getChildAt(minOf(i, appRow.childCount - 1))?.requestFocus()
+            toast(getString(R.string.removed_from_row))
+        }
+        val rows = listOfNotNull(
+            if (hdmi) null else Triple(page(getString(R.string.change_app_picture)) { appPictures(pkg, name) }, R.drawable.ms_add_photo_alternate, null),
+            if (hdmi) null else Triple(page(getString(R.string.app_info)) {
+                closeLauncherSettings()
+                openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
+            }, R.drawable.ms_open_in_new, null),
+            if (canUninstall(pkg)) Triple(page(getString(R.string.uninstall)) { closeLauncherSettings(); uninstall(pkg) }, R.drawable.ms_delete, null) else null,
+        )
+        val picture = app?.let { appBanner(it) }?.takeIf { it.intrinsicWidth >= dp(120) }
+        heroArt = { heroCard(picture ?: app?.let { hiResIcon(it) }, banner = picture != null) }
+        showPage(name, rows.map { it.first }, styles = rows.map { RowStyle(it.second) }, top = chips) { backToTile() }
+        // Focus starts on Move; Up from the first pill goes back to the chips.
+        val firstChip = chips.getChildAt(0)
+        firstChip?.requestFocus()
+        val firstRow = (1 until settingsList.childCount).map { settingsList.getChildAt(it) }.firstOrNull { it.isFocusable }
+        if (firstChip != null && firstRow != null) {
+            firstRow.nextFocusUpId = firstChip.id
+            for (k in 0 until chips.childCount) chips.getChildAt(k).nextFocusDownId = firstRow.id
+        }
+    }
+
+    /** Smooth Plume: an app's main colour, without the contrast check cachedAccent does for marks on cards. */
+    private fun rawAccent(a: App): Int? = if (a.pkg in ACCENTS) ACCENTS[a.pkg] else accent(a.icon).also { ACCENTS[a.pkg] = it }
 
     /** Apps the user installed, and system apps that have an update on top. Never Plume or an HDMI tile. */
     private fun canUninstall(pkg: String): Boolean {
@@ -4549,13 +4684,7 @@ class MainActivity : Activity() {
 
     /** A small Plume-styled menu just above [anchor] (under it when [below]); Back closes it. [rows] builds its rows. */
     private fun popupMenu(anchor: View, below: Boolean = false, rows: (dismiss: () -> Unit) -> List<View>) {
-        val list: LinearLayout = if (glassActive()) glassSurface(dp(14).toFloat()) else LinearLayout(this).apply {
-            background = if (dark) rimCard(dp(12), false, solid = true) else GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(0xFFF7F8FA.toInt())
-            }
-            elevation = if (dark) 0f else dp(8).toFloat()
-        }
+        val list = LinearLayout(this).apply { background = menuCard(22) } // Smooth Plume: same dark card as the popups
         list.orientation = LinearLayout.VERTICAL
         list.setPadding(dp(6), dp(6), dp(6), dp(6))
         val menu = PopupWindow(list, LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT, true)
@@ -6775,6 +6904,48 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Smooth Plume: ChillHub's top bar. The big clock and the date line give way to one capsule at the top right:
+     * "12:15 • martes, noviembre 17", then the round buttons. The capsule is the bar's background, drawn from the
+     * time's left edge to the bar's right end, so moving or hiding icons (applyTopBar) needs nothing more.
+     */
+    private fun chillToolbar() {
+        val bar = wifi.parent as LinearLayout
+        findViewById<View>(R.id.clock).visibility = View.GONE
+        (findViewById<View>(R.id.date).parent as View).visibility = View.GONE // the date, and the weather beside it
+        val time = TextClock(this).apply {
+            format12Hour = "h:mm '•' EEEE, MMMM d"
+            format24Hour = "H:mm '•' EEEE, MMMM d"
+            textSize = 18f
+            typeface = quickBold
+            setTextColor(Color.WHITE)
+            maxLines = 1
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(22), 0, dp(10), 0)
+        }
+        bar.addView(time, 1, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, MATCH_PARENT))
+        bar.gravity = Gravity.CENTER_VERTICAL
+        bar.setPadding(0, dp(6), dp(6), dp(6))
+        bar.background = object : Drawable() {
+            private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x40202226 }
+            private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f; color = 0x2EFFFFFF }
+            private val r = RectF()
+            override fun draw(c: Canvas) {
+                r.set(time.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat())
+                val round = r.height() / 2
+                c.drawRoundRect(r, round, round, fill)
+                r.inset(0.5f, 0.5f)
+                c.drawRoundRect(r, round, round, edge)
+            }
+            override fun setAlpha(a: Int) {}
+            override fun setColorFilter(f: ColorFilter?) {}
+            @Deprecated("Deprecated in Java") override fun getOpacity() = PixelFormat.TRANSLUCENT
+        }
+        time.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> bar.background?.invalidateSelf() }
+    }
+
+    private fun shelfOn() = prefs.getBoolean("app_shelf", true)
+
     /** Smooth Plume: the selection outline, on unless turned off in Style. */
     private fun ringOn() = prefs.getBoolean("focus_ring", true)
 
@@ -6854,6 +7025,7 @@ class MainActivity : Activity() {
     private fun fittingLabel(text: String, size: Float) = FittingLabel(this).apply {
         this.text = text
         textSize = size
+        typeface = quick
         setTextColor(fg)
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
@@ -6862,12 +7034,22 @@ class MainActivity : Activity() {
     private fun label(text: String, size: Float) = TextView(this).apply {
         this.text = text
         textSize = size
+        typeface = quick
         setTextColor(fg)
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    // Smooth Plume: Quicksand (SIL Open Font License, assets/fonts), a rounded face like ChillHub's.
+    private val quick by lazy { quicksand(600) }
+    private val quickBold by lazy { quicksand(700) }
+    private fun quicksand(weight: Int): Typeface = try {
+        Typeface.Builder(assets, "fonts/Quicksand.ttf").setFontVariationSettings("'wght' $weight").build()
+    } catch (_: Exception) {
+        Typeface.DEFAULT
+    }
 
     private companion object {
         var fakeDevice: String? = null // debug builds: see fakeSetup()
@@ -6881,7 +7063,7 @@ class MainActivity : Activity() {
             "centre" to (R.string.align_centre to Gravity.CENTER_HORIZONTAL),
             "right" to (R.string.align_right to Gravity.END),
         )
-        const val SCRIM_ALPHA = 0x99 // the settings panel's dim over the home screen
+        const val SCRIM_ALPHA = 0x66 // the settings' dim over the wallpaper (Smooth Plume: lighter, the home screen fades out)
         const val AREA_ALL = 0
         const val AREA_CLOCK = 1
         const val AREA_APPS = 2
@@ -6925,7 +7107,7 @@ class MainActivity : Activity() {
         val ROW_HELP = mapOf(
             R.string.section_style to R.string.help_style, R.string.section_clock_weather to R.string.help_clock_weather,
             R.string.theme to R.string.help_theme, R.string.glass to R.string.help_glass, R.string.app_animations to R.string.help_app_animations,
-            R.string.wp_blur to R.string.help_wp_blur, R.string.focus_ring to R.string.help_focus_ring,
+            R.string.wp_blur to R.string.help_wp_blur, R.string.focus_ring to R.string.help_focus_ring, R.string.app_shelf to R.string.help_app_shelf,
             R.string.app_names to R.string.help_app_names, R.string.row_position to R.string.help_row_position, R.string.show_row to R.string.help_show_row,
             R.string.clock_style to R.string.help_clock_style, R.string.clock_size to R.string.help_clock_size, R.string.weather to R.string.help_weather, R.string.weather_units to R.string.help_units, R.string.screensaver to R.string.help_screensaver_pick,
             R.string.test_screensaver to R.string.help_preview, R.string.folder_photo_changes to R.string.help_photo_every,
@@ -7032,7 +7214,7 @@ class MainActivity : Activity() {
         const val SIDE_WINDOW = 0.78f // Recent apps: scale of the windows beside the selected one
         val EASE = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f) // Material's emphasized decelerate
         val SPRING = android.view.animation.OvershootInterpolator(1.4f) // Smooth Plume: focus lift with a soft bounce
-        val BLUR_LEVELS = listOf(R.string.off, R.string.blur_light, R.string.blur_medium, R.string.blur_strong, R.string.blur_max)
+        const val TOP_DISC = 0x26FFFFFF // Smooth Plume: a top bar button at rest
         const val FOCUS_MS = 300L
         const val SETTLE_MS = 220L
         @Volatile var APPS: List<App>? = null

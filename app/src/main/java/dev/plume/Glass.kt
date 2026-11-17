@@ -55,7 +55,9 @@ internal fun boxBlur(px: IntArray, w: Int, h: Int, radius: Int, passes: Int = 2)
 }
 
 /** Smooth Plume: box blur radius for each "Background blur" level (0 = off), at [SOFT_W] px wide. */
-internal val BLUR_RADII = intArrayOf(0, 2, 4, 7, 11)
+internal val BLUR_RADII = intArrayOf(0, 2, 3, 5, 8, 11, 14, 17, 20)
+/** Smooth Plume: what each level after "None" is called in the setting, ChillHub's numbers. */
+internal val BLUR_NAMES = listOf("10", "20", "30", "50", "75", "100", "150", "200")
 internal const val SOFT_W = 480
 
 /**

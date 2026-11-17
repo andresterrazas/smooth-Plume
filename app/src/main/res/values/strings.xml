@@ -445,6 +445,9 @@
     <string name="clock_format_preview">Preview: %1$s</string>
     <string name="clock_format_invalid">Use a valid pattern, for example %1$s.</string>
     <!-- Smooth Plume -->
+    <string name="blur_none">None</string>
+    <string name="app_shelf">App shelf</string>
+    <string name="help_app_shelf">A translucent shelf behind the row of apps.</string>
     <string name="wp_blur">Background blur</string>
     <string name="focus_ring">Selection outline</string>
     <string name="blur_light">Light</string>

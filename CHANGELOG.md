@@ -16,6 +16,15 @@ Put changes that are not released under `## Unreleased`. Rename that heading to 
 
 ## Unreleased
 
+## 1.9.0
+
+- **New look, inspired by ChillHub.** Settings show a big picture and title on the left, and the options as pills on the right. The selected pill turns white.
+- **App menu.** Hold OK on an app to open its menu in the app's own colour, with **Move** and **Remove from row** at the top.
+- **Top bar.** The time, the date and the buttons now sit together in one capsule at the top right.
+- **App shelf.** A translucent shelf sits behind the row of apps. Turn it off in **App row → App shelf**.
+- **Background blur** now has levels from 10 to 200, in its own list.
+- A rounded font (Quicksand) for the menus and names.
+
 ## 1.8.0
 
 - **Smooth Plume.** The selected tile springs up with a soft bounce, and the tile you leave settles back gently.

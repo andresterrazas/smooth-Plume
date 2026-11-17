@@ -321,6 +321,9 @@
     <string name="watch_next_tab">Watch Next</string>
     <string name="act_all_apps">Todas las aplicaciones de Plume</string>
     <!-- Smooth Plume -->
+    <string name="blur_none">Ninguno</string>
+    <string name="app_shelf">Repisa de apps</string>
+    <string name="help_app_shelf">Una repisa translúcida detrás de la fila de apps.</string>
     <string name="wp_blur">Difuminado del fondo</string>
     <string name="focus_ring">Contorno de selección</string>
     <string name="blur_light">Ligero</string>
