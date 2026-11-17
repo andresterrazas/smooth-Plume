@@ -265,7 +265,7 @@ internal fun pinsAfterSourcesUpdate(inputs: List<Pair<String, Boolean>>, hidden:
     pinned + inputs.filter { (pkg, offline) -> pkg !in hidden && (!offline || pkg in pinned) }.map { it.first }
 
 /** The icon styles, in the order the setting steps through them. */
-internal val ICON_STYLE_KEYS = listOf("mono", "colour", "banner", "bannermono")
+internal val ICON_STYLE_KEYS = listOf("mono", "colour", "banner", "bannermono", "full") // "full": Smooth Plume's full-colour app icons
 
 /** Banner and Monochrome banner: the row shows the apps' own pictures in 16:9 tiles. */
 internal fun isBannerStyle(style: String) = style.startsWith("banner")
@@ -1488,8 +1488,14 @@ class MainActivity : Activity() {
             val screen = if (bmp != null && (!video || own != null)) glassScreen(bmp, ground) else null
             val sharp = if (bmp != null && !video && glassStyle() == GlassStyle.CLEAR) glassSharp(bmp, ground) else null
             val thumb = bmp?.let { Bitmap.createScaledBitmap(it, 64, maxOf(1, 64 * it.height / it.width), true) }
+            // Smooth Plume: Background blur softens the picture shown; the glass and the text colours still read the sharp one.
+            val blur = wallpaperBlur()
+            val display = if (bmp != null && !video && blur > 0) {
+                (try { softWallpaper(bmp, blur) } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null })
+                    ?.also { bmp.recycle() } ?: bmp
+            } else bmp
             // Nothing reads the pixels from here on: keep the picture in graphics memory only, not once more in the process.
-            val shown = bmp?.let { b ->
+            val shown = display?.let { b ->
                 try {
                     b.copy(Bitmap.Config.HARDWARE, false)?.also { b.recycle() } ?: b
                 } catch (e: Exception) {
@@ -1546,6 +1552,9 @@ class MainActivity : Activity() {
     }
 
     private var wallpaperLoad = 0
+
+    /** Smooth Plume: 0 (off) to 4 (strongest); see BLUR_RADII. */
+    private fun wallpaperBlur() = prefs.getInt("wp_blur", 0).coerceIn(0, BLUR_RADII.size - 1)
     private var folderPending = false
     private var folderRetries = 0
 
@@ -2834,6 +2843,11 @@ class MainActivity : Activity() {
                 else applyGlass()
                 renderSettings(R.string.glass)
             },
+            R.string.wp_blur to { d ->
+                prefs.edit().putInt("wp_blur", BLUR_LEVELS.indices.toList().step(wallpaperBlur(), d)).apply()
+                loadWallpaper()
+                renderSettings(R.string.wp_blur)
+            },
         )
         val rows = linkedMapOf<Int, Triple<String, String, () -> Unit>>(
             R.string.edit_apps_row to Triple(getString(R.string.edit_apps_row), "") { closeLauncherSettings(); startEdit(grab = null) },
@@ -2843,6 +2857,14 @@ class MainActivity : Activity() {
             R.string.wallpaper to Triple(getString(R.string.wallpaper), wallpaperName(currentWallpaper())) { pickWallpaper(dark) },
             R.string.glass to Triple(getString(R.string.glass), getString(glassName())) {
                 steps[R.string.glass]!!(1)
+            },
+            R.string.wp_blur to Triple(getString(R.string.wp_blur), getString(BLUR_LEVELS[wallpaperBlur()])) {
+                steps[R.string.wp_blur]!!(1)
+            },
+            R.string.focus_ring to Triple(getString(R.string.focus_ring), toggle(ringOn())) {
+                prefs.edit().putBoolean("focus_ring", !ringOn()).apply()
+                renderApps() // the tiles get (or lose) their outline when they are made
+                renderSettings(R.string.focus_ring)
             },
             R.string.app_animations to Triple(getString(R.string.app_animations), toggle(animationsOn())) {
                 prefs.edit().putBoolean("app_anim", !animationsOn()).apply()
@@ -2968,7 +2990,7 @@ class MainActivity : Activity() {
         // In the order things sit on the home screen, top to bottom, then the TV itself.
         val sections = listOf(
             Triple(R.string.section_style, "${rows[R.string.theme]!!.second} · ${getString(glassName())}",
-                listOf(R.string.theme, R.string.glass, R.string.app_animations)),
+                listOf(R.string.theme, R.string.glass, R.string.wp_blur, R.string.focus_ring, R.string.app_animations)),
             Triple(R.string.section_app_row, "${rows[R.string.apps_in_row]!!.second} · ${rows[R.string.row_position]!!.second}",
                 listOf(R.string.edit_apps_row, R.string.apps_in_row, R.string.sort_apps, R.string.icon_style, R.string.row_size, R.string.app_names, R.string.row_position)),
             // "When hidden" only means something once the row can hide.
@@ -3004,6 +3026,7 @@ class MainActivity : Activity() {
                 R.string.theme to listOf(R.string.theme_light to R.drawable.ms_light_mode, R.string.theme_dark to R.drawable.ms_dark_mode,
                     R.string.theme_wallpaper to R.drawable.ms_wallpaper, R.string.theme_auto to R.drawable.ms_routine).map { (s, i) -> getString(s) to i },
                 R.string.glass to listOf(R.string.off, R.string.glass_frosted, R.string.glass_clear).map { getString(it) to null },
+                R.string.wp_blur to BLUR_LEVELS.map { getString(it) to null },
                 R.string.sort_apps to listOf(R.string.manual, R.string.most_used).map { getString(it) to null },
                 R.string.app_names to listOf(R.string.on_focus, R.string.always, R.string.never).map { getString(it) to null },
                 R.string.row_size to ROW_SIZES.values.map { getString(it.first) to null },
@@ -3459,15 +3482,21 @@ class MainActivity : Activity() {
     /** Focus fades the plate in and lights the row; the row's own parts restyle themselves in [onFocus]. */
     private fun panelFocus(v: View, radius: Int, help: String?, area: Int?, onFocus: (Boolean) -> Unit) {
         val lit = plate(radius)
+        // Smooth Plume: settings rows get the same outline as the home tiles, and grow a touch when selected.
+        val ring = if (ringOn()) focusRing(radius, focusInk()).also { v.foreground = it } else null
         v.isFocusable = true
         v.isClickable = true
         v.setOnFocusChangeListener { _, focused ->
             v.background = if (focused) lit else null
             if (focused) ValueAnimator.ofInt(0, 255).apply {
-                duration = 140
+                duration = 180
                 interpolator = DECELERATE
                 addUpdateListener { lit.alpha = it.animatedValue as Int }
             }.start()
+            ring?.let { fadeRing(it, focused) }
+            val grow = if (focused) 1.02f else 1f
+            v.animate().scaleX(grow).scaleY(grow)
+                .setDuration(if (focused) FOCUS_MS else SETTLE_MS).setInterpolator(if (focused) SPRING else EASE).start()
             if (!dark) { // the white card needs a shadow to stand off the near-white panel
                 v.outlineProvider = ViewOutlineProvider.BACKGROUND
                 v.elevation = if (focused) dp(3).toFloat() else 0f
@@ -3960,7 +3989,7 @@ class MainActivity : Activity() {
     /** "mono", "colour" or "banner". The old on/off "colour_icons" decides until a style has been picked. */
     private fun iconStyle() = iconStyleOf(prefs.getString("icon_style", null), prefs.getBoolean("colour_icons", false))
 
-    private fun colourIcons() = iconStyle().let { it == "colour" || it == "banner" } // a monochrome banner row keeps the marks grey too
+    private fun colourIcons() = iconStyle().let { it == "colour" || it == "banner" || it == "full" } // a monochrome banner row keeps the marks grey too
 
     /** A brand or app colour made deep enough to carry a white mark. */
     private fun deepen(c: Int) = Color.rgb((Color.red(c) * 0.6f).toInt(), (Color.green(c) * 0.6f).toInt(), (Color.blue(c) * 0.6f).toInt())
@@ -4046,6 +4075,8 @@ class MainActivity : Activity() {
         val onColour = !labeled && isBannerStyle(iconStyle()) && !a.pkg.startsWith(HDMI)
         val t = when {
             custom != null -> tile(name, custom, false, a.pkg) { launch(a) }
+            // Smooth Plume: the app's own icon, in colour, loaded at the highest density the app ships.
+            iconStyle() == "full" && !a.pkg.startsWith(HDMI) -> tile(name, hiResIcon(a), false, a.pkg) { launch(a) }
             a.pkg.startsWith(HDMI) -> tile(name, a.icon, true, a.pkg,
                 tint = BRAND_COLOURS[hdmiIcon(a.label, true)]?.takeIf { colour }) { launch(a) }
             logo != null -> tile(name.takeIf { !logo.second }, getDrawable(logo.first)!!, true, a.pkg,
@@ -4230,6 +4261,23 @@ class MainActivity : Activity() {
         val lum = c?.let { Color.luminance(it) } ?: return null
         return c.takeIf { if (dark) lum > 0.08f else lum < 0.6f }
     }
+
+    /**
+     * Smooth Plume: an app's icon at xxxhdpi, so it stays sharp when the tile is large or lifted; the icon Android gave
+     * us when the app has none that big. Kept as a ConstantState: each tile gets its own drawable from it.
+     */
+    private fun hiResIcon(a: App): Drawable {
+        val kept = if (a.pkg in hiRes) hiRes[a.pkg] else (try {
+            val info = packageManager.resolveActivity(a.launch, 0)?.activityInfo
+            val id = info?.iconResource ?: 0
+            (if (info != null && id != 0) packageManager.getResourcesForApplication(info.applicationInfo)
+                .getDrawableForDensity(id, android.util.DisplayMetrics.DENSITY_XXXHIGH, null) else null)?.constantState
+        } catch (_: Exception) {
+            null
+        }).also { hiRes[a.pkg] = it }
+        return kept?.newDrawable(resources) ?: a.icon.constantState?.newDrawable(resources) ?: a.icon
+    }
+    private val hiRes = HashMap<String, Drawable.ConstantState?>()
 
     /** Optional per-theme icons: assets/icons/<package>_dark.png, <package>_light.png, or <package>.png. */
     private fun customIcon(pkg: String): Drawable? =
@@ -6699,7 +6747,10 @@ class MainActivity : Activity() {
         val frosted = frost && card && glassActive()
         if (frosted) glass.add(v, radius.toFloat())
         v.background = if (dark && card) rimCard(radius, false, frosted = frosted) else rest ?: GradientDrawable().apply { cornerRadius = radius.toFloat() }
-        if (!dark) v.foreground = sheen
+        // Smooth Plume: an outline that fades in around the selected tile (Style → Selection outline).
+        val ring = if (ringOn()) focusRing(radius) else null
+        if (ring != null) v.foreground = if (dark) ring else LayerDrawable(arrayOf(sheen, ring))
+        else if (!dark) v.foreground = sheen
         v.clipToOutline = true
         v.elevation = if (card) dp(2).toFloat() else 0f
         v.isFocusable = true
@@ -6707,6 +6758,7 @@ class MainActivity : Activity() {
         v.setOnLongClickListener { if (!holdFired) fireHold(v); true }
         v.setOnFocusChangeListener { _, focused ->
             sheen.alpha = if (focused) 255 else 0
+            ring?.let { fadeRing(it, focused) }
             if (card && dark) v.background = rimCard(radius, focused, frosted = frosted)
             else if (card) v.background = if (focused) lit else rest
             if (frosted) glass.kick(260) // the lift moves the tile: its blur follows
@@ -6717,9 +6769,29 @@ class MainActivity : Activity() {
                 .scaleX(grow).scaleY(grow)
                 .translationY(if (focused) -maxOf(v.height * 0.06f, dp(4).toFloat()) else 0f)
                 .translationZ(if (focused) dp(14).toFloat() else 0f)
-                .setDuration(160).setInterpolator(DECELERATE).start()
+                // Smooth Plume: the selected tile springs up with a slight overshoot; the one left settles back gently.
+                .setDuration(if (focused) FOCUS_MS else SETTLE_MS).setInterpolator(if (focused) SPRING else EASE).start()
             onFocus?.invoke(focused)
         }
+    }
+
+    /** Smooth Plume: the selection outline, on unless turned off in Style. */
+    private fun ringOn() = prefs.getBoolean("focus_ring", true)
+
+    /** A rounded outline in the card's shape; starts hidden and is faded in by [fadeRing]. */
+    private fun focusRing(radius: Int, color: Int = if (dark || glassActive()) Color.WHITE else fg) = GradientDrawable().apply {
+        cornerRadius = radius.toFloat()
+        setColor(Color.TRANSPARENT)
+        setStroke(dp(3), color)
+        alpha = 0
+    }
+
+    private fun fadeRing(ring: Drawable, on: Boolean) {
+        ValueAnimator.ofInt(ring.alpha, if (on) 255 else 0).apply {
+            duration = if (on) 220L else 140L
+            interpolator = DECELERATE
+            addUpdateListener { ring.alpha = it.animatedValue as Int }
+        }.start()
     }
 
     /**
@@ -6853,6 +6925,7 @@ class MainActivity : Activity() {
         val ROW_HELP = mapOf(
             R.string.section_style to R.string.help_style, R.string.section_clock_weather to R.string.help_clock_weather,
             R.string.theme to R.string.help_theme, R.string.glass to R.string.help_glass, R.string.app_animations to R.string.help_app_animations,
+            R.string.wp_blur to R.string.help_wp_blur, R.string.focus_ring to R.string.help_focus_ring,
             R.string.app_names to R.string.help_app_names, R.string.row_position to R.string.help_row_position, R.string.show_row to R.string.help_show_row,
             R.string.clock_style to R.string.help_clock_style, R.string.clock_size to R.string.help_clock_size, R.string.weather to R.string.help_weather, R.string.weather_units to R.string.help_units, R.string.screensaver to R.string.help_screensaver_pick,
             R.string.test_screensaver to R.string.help_preview, R.string.folder_photo_changes to R.string.help_photo_every,
@@ -6921,7 +6994,7 @@ class MainActivity : Activity() {
             60 to R.string.every_60, 1440 to R.string.every_1440,
         )
         const val CHOSEN = "✓"
-        const val REPO = "aradhyas8/Plume_Launcher"
+        const val REPO = "andresterrazas/smooth-Plume" // updates come from Smooth Plume's releases
         const val UPDATE_STATUS = "dev.plume.UPDATE_STATUS"
         const val WRITE_EPG ="com.android.providers.tv.permission.WRITE_EPG_DATA"
         const val TV_SETTINGS = "com.android.tv.settings"
@@ -6930,7 +7003,7 @@ class MainActivity : Activity() {
         /** "Size" setting -> its name, and how many tiles fit across. 8 and 4 keep the columns over the four cards. */
         val ROW_SIZES = linkedMapOf("standard" to (R.string.size_standard to 8), "large" to (R.string.size_large to 6), "largest" to (R.string.size_largest to 4))
         /** Icon style setting -> its name. */
-        val ICON_STYLES = linkedMapOf(ICON_STYLE_KEYS[0] to R.string.monochrome, ICON_STYLE_KEYS[1] to R.string.colour, ICON_STYLE_KEYS[2] to R.string.banner, ICON_STYLE_KEYS[3] to R.string.banner_mono)
+        val ICON_STYLES = linkedMapOf(ICON_STYLE_KEYS[0] to R.string.monochrome, ICON_STYLE_KEYS[1] to R.string.colour, ICON_STYLE_KEYS[2] to R.string.banner, ICON_STYLE_KEYS[3] to R.string.banner_mono, ICON_STYLE_KEYS[4] to R.string.icon_full)
         /** Glass setting -> its styles in cycling order; null is off. */
         val GLASS_STYLES: List<GlassStyle?> = listOf(null, GlassStyle.FROSTED, GlassStyle.CLEAR)
         val THEMES = listOf("light", "dark", "wallpaper", "auto")
@@ -6958,6 +7031,10 @@ class MainActivity : Activity() {
         val DECELERATE = android.view.animation.DecelerateInterpolator(1.5f)
         const val SIDE_WINDOW = 0.78f // Recent apps: scale of the windows beside the selected one
         val EASE = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f) // Material's emphasized decelerate
+        val SPRING = android.view.animation.OvershootInterpolator(1.4f) // Smooth Plume: focus lift with a soft bounce
+        val BLUR_LEVELS = listOf(R.string.off, R.string.blur_light, R.string.blur_medium, R.string.blur_strong, R.string.blur_max)
+        const val FOCUS_MS = 300L
+        const val SETTLE_MS = 220L
         @Volatile var APPS: List<App>? = null
         @Volatile var SOURCES: List<App>? = null
         private var CVTE_SOURCE_PANEL: Intent? = null

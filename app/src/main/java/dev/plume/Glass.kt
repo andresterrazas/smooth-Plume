@@ -54,6 +54,24 @@ internal fun boxBlur(px: IntArray, w: Int, h: Int, radius: Int, passes: Int = 2)
     return src
 }
 
+/** Smooth Plume: box blur radius for each "Background blur" level (0 = off), at [SOFT_W] px wide. */
+internal val BLUR_RADII = intArrayOf(0, 2, 4, 7, 11)
+internal const val SOFT_W = 480
+
+/**
+ * Smooth Plume: the wallpaper softened for the "Background blur" setting. Worked small ([SOFT_W] px wide), so it costs
+ * a few milliseconds and little memory; the wallpaper view scales it up, which only smooths it further.
+ */
+internal fun softWallpaper(src: Bitmap, level: Int): Bitmap {
+    val w = SOFT_W
+    val h = maxOf(1, w * src.height / maxOf(1, src.width))
+    val small = Bitmap.createScaledBitmap(src, w, h, true)
+    val px = IntArray(w * h).also { small.getPixels(it, 0, w, 0, 0, w, h) }
+    if (small !== src) small.recycle()
+    val out = boxBlur(px, w, h, BLUR_RADII[level.coerceIn(1, BLUR_RADII.size - 1)], passes = 3)
+    return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
+}
+
 /**
  * The frost evens out the wallpaper, as glass does: its brightness pulled 40% toward the middle, so a bright sky or a
  * deep shadow under a pane no longer fights the text, and its colours richer (35% more saturation), so the evened

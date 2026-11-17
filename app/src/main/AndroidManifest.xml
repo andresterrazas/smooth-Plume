@@ -43,7 +43,7 @@
     </queries>
 
     <application
-        android:label="Plume"
+        android:label="Smooth Plume"
         android:banner="@drawable/banner"
         android:icon="@drawable/ic_launcher"
         android:usesCleartextTraffic="true"

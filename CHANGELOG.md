@@ -16,6 +16,13 @@ Put changes that are not released under `## Unreleased`. Rename that heading to 
 
 ## Unreleased
 
+## 1.8.0
+
+- **Smooth Plume.** The selected tile springs up with a soft bounce, and the tile you leave settles back gently.
+- **Selection outline.** A bright outline fades in around the selected tile and settings row. Turn it off in **Style → Selection outline**.
+- **Background blur.** Soften the wallpaper behind the home screen. Select the level in **Style → Background blur**.
+- **Full colour icons.** Select **Icon style → Full colour icons** to show each app's own icon in high resolution.
+- Settings rows grow a little when selected, with a smoother highlight.
 - **Recent apps.** Press Home twice to open a row of app windows. Press Left or Right to switch apps. Press Back to return to Plume.
 - Hold OK on All apps, then select Recent apps. You can also assign Plume recent apps to a remote key.
 - Enable **App window previews** to show each app's last screen on Android 11 and later. Plume keeps them on the TV after a restart.

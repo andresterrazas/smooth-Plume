@@ -444,4 +444,14 @@
     <string name="time_format_tokens">Use HH for 24-hour time, h and a for 12-hour time, and mm for minutes.</string>
     <string name="clock_format_preview">Preview: %1$s</string>
     <string name="clock_format_invalid">Use a valid pattern, for example %1$s.</string>
+    <!-- Smooth Plume -->
+    <string name="wp_blur">Background blur</string>
+    <string name="focus_ring">Selection outline</string>
+    <string name="blur_light">Light</string>
+    <string name="blur_medium">Medium</string>
+    <string name="blur_strong">Strong</string>
+    <string name="blur_max">Maximum</string>
+    <string name="icon_full">Full colour icons</string>
+    <string name="help_wp_blur">Softens the wallpaper behind the home screen. Left and Right change the level.</string>
+    <string name="help_focus_ring">A bright outline around the selected tile and menu row.</string>
 </resources>

@@ -320,4 +320,14 @@
     <string name="cards_rows_one">Ahora solo una fuente tiene series, así que la fila se ve igual.</string>
     <string name="watch_next_tab">Watch Next</string>
     <string name="act_all_apps">Todas las aplicaciones de Plume</string>
+    <!-- Smooth Plume -->
+    <string name="wp_blur">Difuminado del fondo</string>
+    <string name="focus_ring">Contorno de selección</string>
+    <string name="blur_light">Ligero</string>
+    <string name="blur_medium">Medio</string>
+    <string name="blur_strong">Fuerte</string>
+    <string name="blur_max">Máximo</string>
+    <string name="icon_full">Íconos a todo color</string>
+    <string name="help_wp_blur">Difumina el fondo de pantalla detrás de la pantalla de inicio. Izquierda y Derecha cambian el nivel.</string>
+    <string name="help_focus_ring">Un contorno brillante alrededor del ícono y la opción seleccionados.</string>
 </resources>

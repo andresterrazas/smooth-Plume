@@ -1,0 +1,71 @@
+# Smooth Plume: every push to main builds a signed release APK and publishes it as the release for its version
+# (v<versionName>, asset Plume.apk), which is where the in-app updater and the Downloader link look.
+name: Smooth Plume build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smooth-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # A repository secret KEYSTORE_B64 (+ KEYSTORE_PASSWORD) wins; otherwise the key in signing/ is used.
+      # Either way every build has the same signature, so a new APK installs over the old one.
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            store="$RUNNER_TEMP/release.jks"; pass="$KEYSTORE_PASSWORD"
+          else
+            store="$GITHUB_WORKSPACE/signing/smooth-release.jks"; pass="smoothplume"
+          fi
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=smooth\nkeyPassword=%s\n' "$store" "$pass" "$pass" > keystore.properties
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+
+      - name: Version
+        id: ver
+        run: echo "name=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk Plume.apk
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: Smooth-Plume-${{ steps.ver.outputs.name }}
+          path: Plume.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.ver.outputs.name }}
+        run: |
+          notes="$(awk -v v="## $VER" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md)"
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            gh release upload "v$VER" Plume.apk --clobber
+          else
+            gh release create "v$VER" Plume.apk --title "Smooth Plume $VER" --notes "$notes" --target "$GITHUB_SHA"
+          fi
